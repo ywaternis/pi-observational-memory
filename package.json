@@ -3,6 +3,7 @@
   "version": "3.0.3",
   "description": "Observational memory extension for pi — cache-friendly tiered compaction with observations and reflections.",
   "type": "module",
+  "packageManager": "pnpm@11.21.0",
   "license": "MIT",
   "author": "elpapi42",
   "repository": {
@@ -36,7 +37,7 @@
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "*",
     "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-coding-agent": ">=0.80.5",
     "@earendil-works/pi-tui": "*"
   },
   "devDependencies": {

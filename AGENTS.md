@@ -12,7 +12,7 @@ anthropic OAuth, …) return headers-only auth from `getApiKeyAndHeaders`, and p
 caller-supplied `Authorization` header as a substitute apiKey. The acceptance rule mirrors pi's own
 `AgentSession._getRequiredRequestAuth` (`result.auth.apiKey || result.auth.headers`). Do not
 re-introduce a hard `apiKey` requirement — it breaks compaction/consolidation for every OAuth model.
-Tests: `npm test` (vitest); typecheck: `npm run typecheck`.
+Tests: `pnpm test` (vitest); typecheck: `pnpm typecheck`.
 
 ## Maintaining this file
 

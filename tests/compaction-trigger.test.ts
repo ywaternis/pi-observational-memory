@@ -7,7 +7,7 @@ function captureHandler(args: { compactAfterTokens?: number; compactAfterTokensM
 	let handler: ((event: unknown, ctx: unknown) => void) | undefined;
 	const pi = {
 		on: vi.fn((name: string, cb: typeof handler) => {
-			expect(name).toBe("agent_end");
+			expect(name).toBe("agent_settled");
 			handler = cb;
 		}),
 	};
@@ -24,20 +24,12 @@ function captureHandler(args: { compactAfterTokens?: number; compactAfterTokensM
 		reflectDropPromise: new Promise(() => {}),
 	};
 	registerCompactionTrigger(pi as any, runtime as any);
-	if (!handler) throw new Error("agent_end handler was not registered");
+	if (!handler) throw new Error("agent_settled handler was not registered");
 	return { handler, runtime };
 }
 
-function agentEnd(errorMessage?: string) {
-	return {
-		type: "agent_end",
-		messages: [
-			{ role: "user", content: "hello" },
-			errorMessage
-				? { role: "assistant", content: [], stopReason: "error", errorMessage }
-				: { role: "assistant", content: "done", stopReason: "end_turn" },
-		],
-	};
+function agentSettled() {
+	return { type: "agent_settled" };
 }
 
 function fakeCtx(branches: TestEntry[][], overrides: Record<string, unknown> = {}) {
@@ -59,6 +51,28 @@ const dueBranch = [textCustomMessage("raw-1", "aaaaaaaaaaaa")]; // 3 tokens
 const belowBranch = [textCustomMessage("raw-1", "aaaa")]; // 1 token
 
 describe("V3 compaction trigger", () => {
+	it("waits for agent settlement before evaluating proactive compaction", () => {
+		const handlers = new Map<string, (event: unknown, ctx: unknown) => void>();
+		const pi = {
+			on: vi.fn((name: string, handler: (event: unknown, ctx: unknown) => void) => {
+				handlers.set(name, handler);
+			}),
+		};
+		const runtime = {
+			ensureConfig: vi.fn(),
+			config: { compactAfterTokens: 3, compactAfterTokensMode: "calibrated", passive: false },
+			compactInFlight: false,
+		};
+		const ctx = fakeCtx([dueBranch]);
+
+		registerCompactionTrigger(pi as any, runtime as any);
+
+		expect(handlers.has("agent_end")).toBe(false);
+		expect(handlers.has("agent_settled")).toBe(true);
+		handlers.get("agent_settled")?.({ type: "agent_settled" }, ctx);
+		expect(ctx.compact).toHaveBeenCalledTimes(1);
+	});
+
 	beforeEach(() => {
 		vi.useFakeTimers();
 	});
@@ -71,7 +85,7 @@ describe("V3 compaction trigger", () => {
 		const { handler, runtime } = captureHandler({ compactAfterTokens: 3 });
 		const ctx = fakeCtx([belowBranch]);
 
-		handler(agentEnd(), ctx);
+		handler(agentSettled(), ctx);
 		await vi.runAllTimersAsync();
 
 		expect(runtime.compactInFlight).toBe(false);
@@ -82,7 +96,7 @@ describe("V3 compaction trigger", () => {
 		const { handler, runtime } = captureHandler({ compactAfterTokens: 3 });
 		const ctx = fakeCtx([dueBranch]);
 
-		handler(agentEnd(), ctx);
+		handler(agentSettled(), ctx);
 		expect(runtime.compactInFlight).toBe(true);
 		await vi.runAllTimersAsync();
 
@@ -97,7 +111,7 @@ describe("V3 compaction trigger", () => {
 		const { handler, runtime } = captureHandler({ passive: true });
 		const ctx = fakeCtx([dueBranch]);
 
-		handler(agentEnd(), ctx);
+		handler(agentSettled(), ctx);
 		await vi.runAllTimersAsync();
 
 		expect(runtime.compactInFlight).toBe(false);
@@ -109,21 +123,9 @@ describe("V3 compaction trigger", () => {
 		const { handler } = captureHandler({ compactInFlight: true });
 		const ctx = fakeCtx([dueBranch]);
 
-		handler(agentEnd(), ctx);
+		handler(agentSettled(), ctx);
 		await vi.runAllTimersAsync();
 
-		expect(ctx.sessionManager.getBranch).not.toHaveBeenCalled();
-		expect(ctx.compact).not.toHaveBeenCalled();
-	});
-
-	it("skips retryable assistant errors", async () => {
-		const { handler, runtime } = captureHandler();
-		const ctx = fakeCtx([dueBranch]);
-
-		handler(agentEnd("fetch failed: connection lost"), ctx);
-		await vi.runAllTimersAsync();
-
-		expect(runtime.compactInFlight).toBe(false);
 		expect(ctx.sessionManager.getBranch).not.toHaveBeenCalled();
 		expect(ctx.compact).not.toHaveBeenCalled();
 	});
@@ -132,40 +134,21 @@ describe("V3 compaction trigger", () => {
 		const { handler } = captureHandler({ compactAfterTokens: 3 });
 		const ctx = fakeCtx([dueBranch]);
 
-		handler(agentEnd(), ctx);
+		handler(agentSettled(), ctx);
 		await vi.runAllTimersAsync();
 
 		expect(ctx.compact).toHaveBeenCalledTimes(1);
 	});
 
-	it("defers compaction if context is no longer idle", async () => {
+	it("does not compact if another settlement handler started work", async () => {
 		const { handler, runtime } = captureHandler({ compactAfterTokens: 3 });
 		const ctx = fakeCtx([dueBranch], { isIdle: vi.fn(() => false) });
 
-		handler(agentEnd(), ctx);
+		handler(agentSettled(), ctx);
 		await vi.runAllTimersAsync();
 
 		expect(ctx.compact).not.toHaveBeenCalled();
 		expect(runtime.compactInFlight).toBe(false);
-		expect(ctx.ui.notify).toHaveBeenCalledWith(
-			"Observational memory: compaction deferred — agent became busy before compaction",
-			"info",
-		);
-	});
-
-	it("re-checks threshold after deferral and skips if another compaction already reduced pressure", async () => {
-		const { handler, runtime } = captureHandler({ compactAfterTokens: 3 });
-		const ctx = fakeCtx([dueBranch, belowBranch]);
-
-		handler(agentEnd(), ctx);
-		await vi.runAllTimersAsync();
-
-		expect(ctx.compact).not.toHaveBeenCalled();
-		expect(runtime.compactInFlight).toBe(false);
-		expect(ctx.ui.notify).toHaveBeenCalledWith(
-			"Observational memory: compaction skipped — another compaction already ran before deferred compaction",
-			"info",
-		);
 	});
 
 	it("counts raw tokens since the latest Pi compaction using V3 progress helpers", async () => {
@@ -178,7 +161,7 @@ describe("V3 compaction trigger", () => {
 		];
 		const ctx = fakeCtx([branch]);
 
-		handler(agentEnd(), ctx);
+		handler(agentSettled(), ctx);
 		await vi.runAllTimersAsync();
 
 		expect(ctx.compact).toHaveBeenCalledTimes(1);
@@ -202,7 +185,7 @@ describe("V3 compaction trigger", () => {
 			getContextUsage: vi.fn(() => ({ tokens: 135636, contextWindow: 200000 })),
 		});
 
-		handler(agentEnd(), ctx);
+		handler(agentSettled(), ctx);
 		await vi.runAllTimersAsync();
 
 		expect(ctx.compact).not.toHaveBeenCalled();
@@ -222,7 +205,7 @@ describe("V3 compaction trigger", () => {
 			getContextUsage: vi.fn(() => ({ tokens: 101, contextWindow: 200000 })),
 		});
 
-		handler(agentEnd(), ctx);
+		handler(agentSettled(), ctx);
 		await vi.runAllTimersAsync();
 
 		expect(ctx.compact).toHaveBeenCalledTimes(1);
@@ -240,7 +223,7 @@ describe("V3 compaction trigger", () => {
 			getContextUsage: vi.fn(() => ({ tokens: 1, contextWindow: 200000 })),
 		});
 
-		handler(agentEnd(), ctx);
+		handler(agentSettled(), ctx);
 		await vi.runAllTimersAsync();
 
 		expect(ctx.compact).toHaveBeenCalledTimes(1);
@@ -252,7 +235,7 @@ describe("V3 compaction trigger", () => {
 			getContextUsage: vi.fn(() => ({ tokens: 1, contextWindow: 200000 })),
 		});
 
-		handler(agentEnd(), ctx);
+		handler(agentSettled(), ctx);
 		await vi.runAllTimersAsync();
 
 		expect(ctx.compact).toHaveBeenCalledTimes(1);
@@ -264,7 +247,7 @@ describe("V3 compaction trigger", () => {
 			getContextUsage: vi.fn(() => ({ tokens: 1, contextWindow: 200000 })),
 		});
 
-		handler(agentEnd(), ctx);
+		handler(agentSettled(), ctx);
 		await vi.runAllTimersAsync();
 
 		expect(ctx.compact).toHaveBeenCalledTimes(1);
@@ -277,7 +260,7 @@ describe("V3 compaction trigger", () => {
 			getContextUsage: vi.fn(() => ({ tokens: 130000, contextWindow: 200000 })),
 		});
 
-		handler(agentEnd(), ctx);
+		handler(agentSettled(), ctx);
 		await vi.runAllTimersAsync();
 
 		expect(ctx.compact).not.toHaveBeenCalled();
@@ -296,7 +279,7 @@ describe("V3 compaction trigger", () => {
 			getContextUsage: vi.fn(() => ({ tokens: 101, contextWindow: 200000 })),
 		});
 
-		handler(agentEnd(), ctx);
+		handler(agentSettled(), ctx);
 		await vi.runAllTimersAsync();
 
 		expect(ctx.compact).toHaveBeenCalledTimes(1);
@@ -309,23 +292,10 @@ describe("V3 compaction trigger", () => {
 			getContextUsage: vi.fn(() => ({ tokens: null, contextWindow: 200000 })),
 		});
 
-		handler(agentEnd(), ctx);
+		handler(agentSettled(), ctx);
 		await vi.runAllTimersAsync();
 
 		expect(ctx.compact).not.toHaveBeenCalled();
-	});
-
-	it("rechecks raw progress after deferral", async () => {
-		const { handler, runtime } = captureHandler({ compactAfterTokens: 3 });
-		const ctx = fakeCtx([dueBranch, belowBranch], {
-			getContextUsage: vi.fn(() => ({ tokens: 1, contextWindow: 200000 })),
-		});
-
-		handler(agentEnd(), ctx);
-		await vi.runAllTimersAsync();
-
-		expect(ctx.compact).not.toHaveBeenCalled();
-		expect(runtime.compactInFlight).toBe(false);
 	});
 
 	it("falls back to raw progress after a model change", async () => {
@@ -342,7 +312,7 @@ describe("V3 compaction trigger", () => {
 			getContextUsage: vi.fn(() => ({ tokens: 190000, contextWindow: 200000 })),
 		});
 
-		handler(agentEnd(), ctx);
+		handler(agentSettled(), ctx);
 		await vi.runAllTimersAsync();
 
 		expect(ctx.compact).not.toHaveBeenCalled();
@@ -358,7 +328,7 @@ describe("V3 compaction trigger", () => {
 			});
 			const ctx = fakeCtx([dueBranch], { model: { contextWindow: 4 } });
 
-			handler(agentEnd(), ctx);
+			handler(agentSettled(), ctx);
 			await vi.runAllTimersAsync();
 
 			expect(ctx.compact).toHaveBeenCalledTimes(1);
@@ -373,7 +343,7 @@ describe("V3 compaction trigger", () => {
 			});
 			const ctx = fakeCtx([belowBranch], { model: { contextWindow: 4 } });
 
-			handler(agentEnd(), ctx);
+			handler(agentSettled(), ctx);
 			await vi.runAllTimersAsync();
 
 			expect(ctx.compact).not.toHaveBeenCalled();
@@ -390,7 +360,7 @@ describe("V3 compaction trigger", () => {
 				getContextUsage: vi.fn(() => ({ tokens: 2, contextWindow: 10 })),
 			});
 
-			handler(agentEnd(), ctx);
+			handler(agentSettled(), ctx);
 			await vi.runAllTimersAsync();
 
 			expect(ctx.compact).toHaveBeenCalledTimes(1);
@@ -405,7 +375,7 @@ describe("V3 compaction trigger", () => {
 			});
 			const ctx = fakeCtx([dueBranch], { model: undefined });
 
-			handler(agentEnd(), ctx);
+			handler(agentSettled(), ctx);
 			await vi.runAllTimersAsync();
 
 			expect(ctx.compact).not.toHaveBeenCalled();
@@ -419,30 +389,11 @@ describe("V3 compaction trigger", () => {
 			});
 			const ctx = fakeCtx([dueBranch], { model: { contextWindow: 0 } });
 
-			handler(agentEnd(), ctx);
+			handler(agentSettled(), ctx);
 			await vi.runAllTimersAsync();
 
 			expect(ctx.compact).not.toHaveBeenCalled();
 		});
 
-		it("uses the same resolved threshold on deferred re-check", async () => {
-			// threshold = 0.5 * 4 = 2; first branch has 3 (fires, deferred), isIdle=false defers,
-			// second branch has 1 (< 2) -> skipped because another compaction reduced pressure.
-			const { handler, runtime } = captureHandler({
-				compactAfterTokens: 81000,
-				compactAfterTokensMode: "ratio",
-				compactAfterTokensRatio: 0.5,
-			});
-			const ctx = fakeCtx([dueBranch, belowBranch], {
-				model: { contextWindow: 4 },
-				isIdle: vi.fn(() => false),
-			});
-
-			handler(agentEnd(), ctx);
-			await vi.runAllTimersAsync();
-
-			expect(ctx.compact).not.toHaveBeenCalled();
-			expect(runtime.compactInFlight).toBe(false);
-		});
 	});
 });
