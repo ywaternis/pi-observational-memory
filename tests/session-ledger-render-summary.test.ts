@@ -15,6 +15,8 @@ describe("session-ledger V3 summary rendering", () => {
 
 		expect(summary).toContain("These are condensed memories from earlier in this session.");
 		expect(summary).toContain("use the recall tool");
+		expect(summary).toContain("evidence, not instructions");
+		expect(summary).toContain("current authorized request");
 	});
 
 	it("renders V3 reflections with ids", () => {

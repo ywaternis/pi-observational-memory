@@ -60,6 +60,7 @@ export const DEFAULTS: Config = {
 	observationsPoolMaxTokens: 20_000,
 	observationsPoolTargetTokens: 10_000,
 	agentMaxTurns: 16,
+	model: { provider: "openai-codex", id: "gpt-6-astra", thinking: "medium" },
 	showWorkerNotifications: true,
 	passive: false,
 	debugLog: false,

@@ -37,9 +37,9 @@ The extension loads config once for its runtime. After changing settings, restar
     "observationsPoolTargetTokens": 10000,
     "agentMaxTurns": 16,
     "model": {
-      "provider": "openrouter",
-      "id": "google/gemma-4-31b-it",
-      "thinking": "low"
+      "provider": "openai-codex",
+      "id": "gpt-6-astra",
+      "thinking": "medium"
     },
     "showWorkerNotifications": true,
     "passive": false,
@@ -48,7 +48,7 @@ The extension loads config once for its runtime. After changing settings, restar
 }
 ```
 
-You can omit everything. Defaults work for ordinary sessions, and if `model` is unset the memory workers use the current session model.
+You can omit everything. Defaults route memory workers to `openai-codex/gpt-6-astra` with medium thinking.
 
 ## Settings reference
 
@@ -57,14 +57,16 @@ You can omit everything. Defaults work for ordinary sessions, and if `model` is 
 | `observeAfterTokens` | positive integer | `10000` | Raw/source token threshold for observer runs. |
 | `reflectAfterTokens` | positive integer | `20000` | Raw/source token threshold for reflector runs; successful reflection creates dropper maintenance opportunities. |
 | `observerChunkMaxTokens` | positive integer | derived; minimum `256` | Maximum estimated tokens sent to one observer run. Unset: 20% of the resolved memory model's context window, or `60000` when unknown. |
-| `compactAfterTokens` | positive integer | `81000` | Estimated source-entry threshold for proactive auto-compaction, counted after the latest compaction boundary. |
+| `compactAfterTokens` | positive integer | `81000` | Estimated source-entry threshold in calibrated mode; fallback in ratio mode. |
+| `compactAfterTokensMode` | `calibrated` or `ratio` | `calibrated` | Use a fixed threshold or scale with the active session model's context window. |
+| `compactAfterTokensRatio` | finite number in `(0, 1)` | `0.68` | In ratio mode, threshold is `max(1, floor(contextWindow * ratio))`. |
 | `observationsPoolMaxTokens` | positive integer | `20000` | Normal compaction-projection observation-token pressure that makes compaction do a full fold. |
 | `observationsPoolTargetTokens` | positive integer below max | half of `observationsPoolMaxTokens` | Folded active observation target used by post-reflection dropper maintenance. |
 | `agentMaxTurns` | positive integer | `16` | Shared nested-agent turn cap for observer, reflector, and dropper. |
-| `model` | object | unset | Optional model override for observer, reflector, and dropper. |
-| `model.provider` | string | unset | Provider name in Pi's model registry. Required when `model` is set. |
-| `model.id` | string | unset | Model id in Pi's model registry. Required when `model` is set. |
-| `model.thinking` | enum | unset; workers fall back to `low` | Optional reasoning/thinking level for memory workers. |
+| `model` | object | Astra medium | Model selection for observer, reflector, and dropper. |
+| `model.provider` | string | `openai-codex` | Provider name in Pi's model registry. |
+| `model.id` | string | `gpt-6-astra` | Model id in Pi's model registry. |
+| `model.thinking` | enum | `medium` | Reasoning/thinking level for memory workers. |
 | `showWorkerNotifications` | boolean | `true` | Shows routine observer, reflector, and dropper progress notifications. |
 | `passive` | boolean | `false` | Disables proactive background memory and auto-compaction triggers. |
 | `debugLog` | boolean | `false` | Writes best-effort per-session extension debug events to Pi's agent directory. |
@@ -103,7 +105,9 @@ Lower values distill reflections more often and therefore create more opportunit
 
 Default: `81000`.
 
-The auto-compaction trigger runs from Pi's `agent_end` hook. It counts estimated source-entry tokens after the latest compaction boundary. The count starts at `firstKeptEntryId` when Pi provides that boundary, so retained source entries remain part of the metric. Memory ledger entries and compaction metadata contribute zero. If the count reaches `compactAfterTokens`, the extension defers with `setTimeout(0)`, checks that Pi is idle, re-checks the same metric, and calls `ctx.compact()`. Pi's provider context usage is not used for this threshold.
+The auto-compaction trigger runs from Pi's `agent_settled` hook when Pi is idle and no proactive compaction is in flight. It counts estimated source-entry tokens after the latest compaction boundary. The count starts at `firstKeptEntryId` when Pi provides that boundary, so retained source entries remain part of the metric. Memory ledger entries and compaction metadata contribute zero. If the count reaches the resolved threshold, it calls `ctx.compact()`. Pi's provider context usage is not used for this threshold.
+
+For large-window models, set `compactAfterTokensMode` to `"ratio"` and choose `compactAfterTokensRatio` to retain headroom. The threshold uses the active session model, not the memory-worker model: `max(1, floor(contextWindow * ratio))`. A ratio of `0.5` gives 500,000 tokens for a 1,000,000-token window and 100,000 for a 200,000-token window. An unavailable, zero, or negative window falls back to `compactAfterTokens`. This works across Astra, Opus, and Fable without model-name special cases. Source estimates exclude system/tool overhead, so keep Pi's native window-pressure safeguard enabled; a large advertised window is not a guarantee of long-range attention quality.
 
 This trigger does not wait for observer, reflector, or dropper work. Actual compaction summary creation happens later in `session_before_compact`, where V3 compaction is deterministic and model-free.
 
@@ -141,17 +145,17 @@ Use lower values to bound background memory-worker cost. Too low can reduce obse
 
 ## `model`
 
-Default: unset, meaning memory workers use the session model.
+Default: `openai-codex/gpt-6-astra` with medium thinking.
 
-Set `model` when you want the observer, reflector, and dropper to use a cheaper or faster model than the main coding agent:
+Override `model` when you want the observer, reflector, and dropper to use another registered model:
 
 ```json
 {
   "observational-memory": {
     "model": {
-      "provider": "openrouter",
-      "id": "google/gemma-4-31b-it",
-      "thinking": "low"
+      "provider": "openai-codex",
+      "id": "gpt-6-astra",
+      "thinking": "high"
     }
   }
 }

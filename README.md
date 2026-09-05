@@ -214,9 +214,9 @@ A typical config:
     "observationsPoolTargetTokens": 10000,
     "agentMaxTurns": 16,
     "model": {
-      "provider": "openrouter",
-      "id": "google/gemma-4-31b-it",
-      "thinking": "low"
+      "provider": "openai-codex",
+      "id": "gpt-6-astra",
+      "thinking": "medium"
     },
     "showWorkerNotifications": true,
     "passive": false,
@@ -280,7 +280,7 @@ on the `Next compaction` line regardless of mode.
 | `observationsPoolMaxTokens` | `20000`       | Observation-token budget used for compaction full-fold pressure.                                  |
 | `observationsPoolTargetTokens` | half of max | Active observation target used by post-reflection dropper maintenance.                            |
 | `agentMaxTurns`             | `16`          | Shared turn cap for background memory-agent loops.                                                |
-| `model`                     | session model | Optional memory-worker model override: `{ provider, id, thinking }`.                              |
+| `model`                     | Astra medium  | Memory-worker model selection: `{ provider, id, thinking }`.                                      |
 | `showWorkerNotifications`   | `true`        | Shows routine observer, reflector, and dropper progress notifications. Warnings and errors are unaffected. |
 | `passive`                   | `false`       | Disables proactive background observation, reflection, maintenance, and auto-compaction triggers. |
 | `debugLog`                  | `false`       | Writes opt-in per-session extension debug events to Pi's agent directory.                         |
@@ -295,7 +295,7 @@ Valid `model.thinking` values are:
 * `xhigh`
 * `max`
 
-If no `model` is configured, memory workers use the session model.
+By default, memory workers use `openai-codex/gpt-6-astra` with medium thinking. Configure `model` to use another registered model.
 
 Set `showWorkerNotifications` to `false` to hide routine worker start and completion messages (including deliberate-empty observer info messages). Model fallback/unavailability, worker failures (including observer stream errors), compaction notifications, and explicit `/om:*` command output remain visible.
 
@@ -405,8 +405,8 @@ Example V2 config:
     "observationThresholdTokens": 1000,
     "compactionThresholdTokens": 50000,
     "reflectionThresholdTokens": 30000,
-    "compactionModel": { "provider": "openrouter", "id": "google/gemma-4-31b-it" },
-    "thinkingLevel": "low",
+    "compactionModel": { "provider": "openai-codex", "id": "gpt-6-astra" },
+    "thinkingLevel": "medium",
     "observerMaxTurnsPerRun": 8,
     "reflectorMaxTurnsPerPass": 12,
     "prunerMaxTurnsPerPass": 12,
@@ -427,9 +427,9 @@ V3 equivalent:
     "observationsPoolTargetTokens": 10000,
     "agentMaxTurns": 12,
     "model": {
-      "provider": "openrouter",
-      "id": "google/gemma-4-31b-it",
-      "thinking": "low"
+      "provider": "openai-codex",
+      "id": "gpt-6-astra",
+      "thinking": "medium"
     },
     "passive": false
   }

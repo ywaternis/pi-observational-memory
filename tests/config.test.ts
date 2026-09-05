@@ -44,6 +44,7 @@ describe("V3 config", () => {
 			observationsPoolMaxTokens: 20000,
 			observationsPoolTargetTokens: 10000,
 			agentMaxTurns: 16,
+			model: { provider: "openai-codex", id: "gpt-6-astra", thinking: "medium" },
 			showWorkerNotifications: true,
 			passive: false,
 			debugLog: false,
@@ -255,6 +256,8 @@ describe("V3 config", () => {
 		it("scales by context window in ratio mode", () => {
 			const config = { ...DEFAULTS, compactAfterTokensMode: "ratio", compactAfterTokensRatio: 0.5, compactAfterTokens: 81000 } as any;
 			expect(resolveCompactAfterTokens(config, 1_000_000)).toBe(500_000);
+			expect(resolveCompactAfterTokens(config, 1_050_000)).toBe(525_000);
+			expect(resolveCompactAfterTokens(config, 272_000)).toBe(136_000);
 			expect(resolveCompactAfterTokens(config, 200_000)).toBe(100_000);
 		});
 
