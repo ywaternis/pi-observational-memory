@@ -146,7 +146,13 @@ describe("OAuth provider end-to-end consolidation", () => {
 
 		const runtime = new Runtime();
 		runtime.configLoaded = true;
-		runtime.config = { ...DEFAULTS, observeAfterTokens: 1, reflectAfterTokens: 1_000_000, agentMaxTurns: 1 };
+		runtime.config = {
+			...DEFAULTS,
+			observeAfterTokens: 1,
+			reflectAfterTokens: 1_000_000,
+			agentMaxTurns: 1,
+			model: undefined,
+		};
 
 		registerConsolidationTrigger(pi as any, runtime);
 
@@ -200,7 +206,13 @@ describe("OAuth provider end-to-end consolidation", () => {
 
 		const runtime = new Runtime();
 		runtime.configLoaded = true;
-		runtime.config = { ...DEFAULTS, observeAfterTokens: 1, reflectAfterTokens: 1_000_000, agentMaxTurns: 1 };
+		runtime.config = {
+			...DEFAULTS,
+			observeAfterTokens: 1,
+			reflectAfterTokens: 1_000_000,
+			agentMaxTurns: 1,
+			model: undefined,
+		};
 
 		registerConsolidationTrigger(pi as any, runtime);
 		handlers.turn_end!(undefined, {
