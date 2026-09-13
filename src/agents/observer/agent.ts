@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { agentLoop, type AgentContext, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
 import type { Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { Type } from "@earendil-works/pi-ai";
@@ -98,7 +99,30 @@ export function normalizeSourceEntryIds(
 	return Array.from(seen).sort((a, b) => (allowedOrder.get(a) ?? 0) - (allowedOrder.get(b) ?? 0));
 }
 
+// Retry only explicit capacity failures, not auth, validation, or cancellation errors.
+const OVERLOAD_ERROR = /\boverloaded\b|\bserver(?:s)? (?:are |is )?(?:currently )?(?:too )?busy\b|\boverloaded_error\b/i;
+const OVERLOAD_RETRY_DELAYS_MS = [1_000, 2_000, 4_000];
+
 export async function runObserver(args: RunObserverArgs): Promise<Observation[] | undefined> {
+	for (let attempt = 0; ; attempt++) {
+		args.signal?.throwIfAborted();
+		try {
+			return await runObserverAttempt(args);
+		} catch (error) {
+			const delay = OVERLOAD_RETRY_DELAYS_MS[attempt];
+			if (
+				args.signal?.aborted ||
+				!(error instanceof ObserverStreamError) ||
+				error.stopReason !== "error" ||
+				!OVERLOAD_ERROR.test(error.message) ||
+				delay === undefined
+			) throw error;
+			await sleep(delay, undefined, { signal: args.signal });
+		}
+	}
+}
+
+async function runObserverAttempt(args: RunObserverArgs): Promise<Observation[] | undefined> {
 	const { model, apiKey, headers, priorReflections, priorObservations, chunk, allowedSourceEntryIds, signal } = args;
 	const conversation = chunk.trim();
 	if (!conversation) return undefined;
